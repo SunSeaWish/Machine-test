@@ -1,0 +1,43 @@
+import org.apache.spark.sql.{SparkSession, Row}
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.expressions.Window
+import org.apache.spark.sql.functions._
+
+val data = Seq(
+  ("ABC17969(AB)", "1", "ABC17969", 2022),
+  ("ABC17969(AB)", "2", "CDC52533", 2022),
+  ("ABC17969(AB)", "3", "DEC59161", 2023),
+  ("ABC17969(AB)", "4", "F43874", 2022),
+  ("ABC17969(AB)", "5", "MY06154", 2021),
+  ("ABC17969(AB)", "6", "MY4387", 2022),
+  ("AE686(AE)", "7", "AE686", 2023),
+  ("AE686(AE)", "8", "BH2740", 2021),
+  ("AE686(AE)", "9", "EG999", 2021),
+  ("AE686(AE)", "10", "AE0908", 2021),
+  ("AE686(AE)", "11", "QA402", 2022),
+  ("AE686(AE)", "12", "OM691", 2022)
+)
+
+val schema = StructType(Seq(
+|  StructField("peer_id", StringType, true),
+|  StructField("id_1", StringType, true),
+|  StructField("id_2", StringType, true),
+|  StructField("year", IntegerType, true)
+|))
+
+val rdd = spark.sparkContext.parallelize(data.map{ case (peer_id, id_1, id_2, year) =>
+|  Row(peer_id, id_1, id_2, year)
+|})
+
+val df = spark.createDataFrame(rdd, schema)
+
+val result1 = df.filter(col("id_2").isNotNull).select(concat(col("peer_id"), lit(" is "), col("year")))
+val result2 = df.groupBy("peer_id", "year").agg(count("*").as("count")).filter(col("count") <= 4).orderBy(col("peer_id"),col( "year").desc)
+             
+
+
+val windowSpec = Window.partitionBy("peer_id").orderBy(desc("year")).rowsBetween(Window.unboundedPreceding, 0)
+
+val minYear = result2.withColumn("cumulative_count", sum("count").over(windowSpec)).withColumn("result_year", when(col("cumulative_count") >= 3, col("year")).otherwise(lit(null))).filter(col("cumulative_count") > 3).groupBy("peer_id").agg(max("year").as("min_year"))
+
+val result3 = result2.join(minYear, Seq("peer_id"), "left").filter(col("year") > col("min_year")).select("peer_id","year")
